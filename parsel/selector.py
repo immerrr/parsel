@@ -150,7 +150,7 @@ class Selector(object):
     """
 
     __slots__ = ['text', 'namespaces', 'type', '_expr', 'root',
-                 '__weakref__', '_parser', '_csstranslator', '_tostring_method']
+                 '__weakref__', '_ctgroup']
 
     _default_type = None
     _default_namespaces = {
@@ -168,11 +168,17 @@ class Selector(object):
     selectorlist_cls = SelectorList
 
     def __init__(self, text=None, type=None, namespaces=None, root=None,
-                 base_url=None, _expr=None):
+                 base_url=None, _expr=None, _fastpath_kwargs=None):
+        if _fastpath_kwargs is not None:
+            self._expr = _fastpath_kwargs.get('_expr', _expr)
+            self.root = _fastpath_kwargs.get('root', root)
+            self.namespaces = _fastpath_kwargs.get('namespaces', namespaces)
+            self.type = _fastpath_kwargs.get('type', type)
+            self._ctgroup = _fastpath_kwargs['_ctgroup']
+            return
+
         self.type = st = _st(type or self._default_type)
-        self._parser = _ctgroup[st]['_parser']
-        self._csstranslator = _ctgroup[st]['_csstranslator']
-        self._tostring_method = _ctgroup[st]['_tostring_method']
+        self._ctgroup = _ctgroup[st]
 
         if text is not None:
             if not isinstance(text, six.text_type):
@@ -186,6 +192,18 @@ class Selector(object):
             self.namespaces.update(namespaces)
         self.root = root
         self._expr = _expr
+
+    @property
+    def _parser(self):
+        return self._ctgroup['_parser']
+
+    @property
+    def _csstranslator(self):
+        return self._ctgroup['_csstranslator']
+
+    @property
+    def _tostring_method(self):
+        return self._ctgroup['_tostring_method']
 
     def _get_root(self, text, base_url=None):
         return create_root_node(text, self._parser, base_url=base_url)
@@ -228,11 +246,20 @@ class Selector(object):
         if type(result) is not list:
             result = [result]
 
-        result = [self.__class__(root=x, _expr=query,
-                                 namespaces=self.namespaces,
-                                 type=self.type)
-                  for x in result]
-        return self.selectorlist_cls(result)
+        fp_kwargs = {
+            '_expr': query,
+            'namespaces': self.namespaces,
+            'type': self.type,
+            '_ctgroup': self._ctgroup,
+        }
+        cls = self.__class__
+        return self.selectorlist_cls(
+            cls(
+                root=x,
+                _fastpath_kwargs=fp_kwargs
+            )
+            for x in result
+        )
 
     def css(self, query):
         """
